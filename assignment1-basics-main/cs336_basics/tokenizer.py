@@ -1,7 +1,7 @@
 import regex as re
 from collections.abc import Iterable
 
-class BPRTokenizer:
+class BPETokenizer:
     def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None):
 
         # 建立双向映射，方便查表
@@ -16,9 +16,9 @@ class BPRTokenizer:
         self.special_tokens = special_tokens or []
 
         # 构建特殊 Token 的正则表达式
-        if self.special_token:
+        if self.special_tokens:
 
-            sorted_special = sorted(self.special tokens, key=len, reverse=True)
+            sorted_special = sorted(self.special_tokens, key=len, reverse=True)
 
             special_pattern = "|".join(re.escape(t) for t in sorted_special)
             self.special_regex = re.compile(special_pattern)

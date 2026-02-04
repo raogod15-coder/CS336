@@ -1,4 +1,7 @@
-def run_train_bpe(
+import os
+import regex as re
+from collections import Counter,defaultdict
+def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
@@ -33,35 +36,58 @@ def run_train_bpe(
     # 目标词表大小 = 基础字节数 (256) + 特殊 Token 数 + 需要新生成的 Token 数
     num_merges = vocab_size - 256 - len(special_tokens)
 
-    # 读取语料，并按特殊 Token 分割
-    with open(input_path,"r",encoding="utf-8") as f:
-        text = f.read()
-
-    # special_tokens不参与语料统计
-    if special_tokens:
-
-        special_regex = "|".join(re.escape(t) for t in special_tokens)
-
-        parts = re.split(f"({special_regex})", text)
-
-        train_segment = [p for p in parts if p not in special_tokens]
-    else:
-        train_segment = [text]
-
-    # 预分词并统计词频
-    # GPT-2 不允许跨越类型合并，保护空格
+    # Pre-tokenization + counting using chunked reads to reduce memory use and speed up.
     gpt2_pat = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
-    # raw_counts: 存储每个"单词"(预分词后的结果)及其出现频率
     raw_counts = Counter()
-    for segment in train_segment:
-        words = gpt2_pat.findall(segment)
-        for word in words:
-            raw_counts[tuple(bytes([b]) for b in word.encode("utf-8"))] += 1
+    if special_tokens:
+        special_regex = "|".join(re.escape(t) for t in special_tokens)
+        split_pat = re.compile(f"({special_regex})")
+    else:
+        split_pat = None
 
-    # 构建高效数据结构以支持快速合并
-    # words_list: 存储每个单词的字节列表  使用 list 而不是 tuple 因为BPE合并会修改单词内部结构
-    # counts_list: 存储对应单词的频率
+    chunk_size = 8 * 1024 * 1024  # 8MB
+    carry = ""
+
+    with open(input_path, "r", encoding="utf-8") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            carry += chunk
+
+            # Process full lines; keep the last partial line in carry.
+            last_nl = carry.rfind("
+")
+            if last_nl == -1:
+                # No newline yet; keep buffering.
+                continue
+
+            to_process = carry[: last_nl + 1]
+            carry = carry[last_nl + 1 :]
+
+            if split_pat and any(t in to_process for t in special_tokens):
+                parts = split_pat.split(to_process)
+                segments = [p for p in parts if p and p not in special_tokens]
+            else:
+                segments = [to_process]
+
+            for segment in segments:
+                for word in gpt2_pat.findall(segment):
+                    raw_counts[tuple(bytes([b]) for b in word.encode("utf-8"))] += 1
+
+        # Process remaining carry
+        if carry:
+            if split_pat and any(t in carry for t in special_tokens):
+                parts = split_pat.split(carry)
+                segments = [p for p in parts if p and p not in special_tokens]
+            else:
+                segments = [carry]
+
+            for segment in segments:
+                for word in gpt2_pat.findall(segment):
+                    raw_counts[tuple(bytes([b]) for b in word.encode("utf-8"))] += 1
+
     words_list = []
     counts_list = []
     for word_tuple, freq in raw_counts.items():
