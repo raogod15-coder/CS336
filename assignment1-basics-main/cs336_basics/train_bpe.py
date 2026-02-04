@@ -57,8 +57,7 @@ def train_bpe(
             carry += chunk
 
             # Process full lines; keep the last partial line in carry.
-            last_nl = carry.rfind("
-")
+            last_nl = carry.rfind("\n")
             if last_nl == -1:
                 # No newline yet; keep buffering.
                 continue
@@ -87,7 +86,7 @@ def train_bpe(
             for segment in segments:
                 for word in gpt2_pat.findall(segment):
                     raw_counts[tuple(bytes([b]) for b in word.encode("utf-8"))] += 1
-
+                    
     words_list = []
     counts_list = []
     for word_tuple, freq in raw_counts.items():
